@@ -3,12 +3,25 @@
 import { useRef, useState } from "react";
 import type { FFmpeg } from "@ffmpeg/ffmpeg";
 
-type Status =
+type Status = "idle" | "processing" | "done" | "error";
+
+type TranscribeStatus =
   | "idle"
-  | "loading-engine"
-  | "processing"
+  | "extracting-audio"
+  | "uploading"
   | "done"
   | "error";
+
+interface TranscriptSegment {
+  start: number;
+  end: number;
+  text: string;
+}
+
+interface TranscriptResult {
+  text: string;
+  segments: TranscriptSegment[];
+}
 
 function formatSeconds(seconds: number) {
   return seconds.toFixed(1);
@@ -25,6 +38,12 @@ export default function VideoTrimmer() {
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
+  const [transcribeStatus, setTranscribeStatus] =
+    useState<TranscribeStatus>("idle");
+  const [transcript, setTranscript] = useState<TranscriptResult | null>(null);
+  const [transcribeError, setTranscribeError] = useState("");
+
+  const [engineLoading, setEngineLoading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -47,18 +66,22 @@ export default function VideoTrimmer() {
   async function getFfmpeg() {
     if (ffmpegRef.current) return ffmpegRef.current;
 
-    setStatus("loading-engine");
-    const { FFmpeg } = await import("@ffmpeg/ffmpeg");
-    const ffmpeg = new FFmpeg();
-    ffmpeg.on("progress", ({ progress: ratio }) => {
-      setProgress(Math.min(100, Math.round(ratio * 100)));
-    });
-    await ffmpeg.load({
-      coreURL: "/ffmpeg/ffmpeg-core.js",
-      wasmURL: "/ffmpeg/ffmpeg-core.wasm",
-    });
-    ffmpegRef.current = ffmpeg;
-    return ffmpeg;
+    setEngineLoading(true);
+    try {
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on("progress", ({ progress: ratio }) => {
+        setProgress(Math.min(100, Math.round(ratio * 100)));
+      });
+      await ffmpeg.load({
+        coreURL: "/ffmpeg/ffmpeg-core.js",
+        wasmURL: "/ffmpeg/ffmpeg-core.wasm",
+      });
+      ffmpegRef.current = ffmpeg;
+      return ffmpeg;
+    } finally {
+      setEngineLoading(false);
+    }
   }
 
   async function handleTrim() {
@@ -105,6 +128,64 @@ export default function VideoTrimmer() {
         "Có lỗi khi xử lý video. Thử lại với video khác hoặc đoạn cắt ngắn hơn."
       );
       setStatus("error");
+    }
+  }
+
+  async function handleTranscribe() {
+    if (!file) return;
+
+    setTranscribeError("");
+    setTranscript(null);
+
+    try {
+      const ffmpeg = await getFfmpeg();
+      setTranscribeStatus("extracting-audio");
+
+      const { fetchFile } = await import("@ffmpeg/util");
+      const inputName = "src" + (file.name.match(/\.\w+$/)?.[0] ?? ".mp4");
+      const audioName = "audio.mp3";
+
+      await ffmpeg.writeFile(inputName, await fetchFile(file));
+      await ffmpeg.exec([
+        "-i",
+        inputName,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-b:a",
+        "32k",
+        audioName,
+      ]);
+      const audioData = await ffmpeg.readFile(audioName);
+      const audioBlob = new Blob([audioData as BlobPart], {
+        type: "audio/mpeg",
+      });
+      await ffmpeg.deleteFile(inputName);
+      await ffmpeg.deleteFile(audioName);
+
+      setTranscribeStatus("uploading");
+      const formData = new FormData();
+      formData.append("audio", audioBlob, "audio.mp3");
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error ?? "Có lỗi không xác định.");
+      }
+      setTranscript(data);
+      setTranscribeStatus("done");
+    } catch (err) {
+      console.error(err);
+      setTranscribeError(
+        err instanceof Error
+          ? err.message
+          : "Có lỗi khi tạo phụ đề. Thử lại sau."
+      );
+      setTranscribeStatus("error");
     }
   }
 
@@ -173,17 +254,13 @@ export default function VideoTrimmer() {
 
           <button
             onClick={handleTrim}
-            disabled={
-              !file ||
-              end <= start ||
-              status === "loading-engine" ||
-              status === "processing"
-            }
+            disabled={!file || end <= start || engineLoading || status === "processing"}
             className="rounded-full bg-foreground px-5 py-3 font-medium text-background transition-colors hover:bg-[#383838] disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-[#ccc]"
           >
-            {status === "loading-engine" && "Đang tải công cụ xử lý video…"}
-            {status === "processing" && `Đang cắt video… ${progress}%`}
-            {(status === "idle" || status === "done" || status === "error") &&
+            {engineLoading && "Đang tải công cụ xử lý video…"}
+            {!engineLoading && status === "processing" && `Đang cắt video… ${progress}%`}
+            {!engineLoading &&
+              (status === "idle" || status === "done" || status === "error") &&
               "Cắt video"}
           </button>
 
@@ -192,6 +269,63 @@ export default function VideoTrimmer() {
               {errorMessage}
             </p>
           )}
+
+          <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+            <div className="flex flex-col gap-1">
+              <p className="font-medium text-black dark:text-zinc-50">
+                Tạo phụ đề tự động (thử nghiệm)
+              </p>
+              <p className="text-sm text-zinc-500">
+                Chỉ âm thanh được gửi lên máy chủ để chuyển thành văn bản —
+                video vẫn không rời khỏi máy bạn.
+              </p>
+            </div>
+            <button
+              onClick={handleTranscribe}
+              disabled={
+                !file ||
+                engineLoading ||
+                transcribeStatus === "extracting-audio" ||
+                transcribeStatus === "uploading"
+              }
+              className="w-fit rounded-full border border-black/[.08] px-5 py-2 text-sm font-medium hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+            >
+              {engineLoading && "Đang tải công cụ xử lý video…"}
+              {!engineLoading &&
+                transcribeStatus === "extracting-audio" &&
+                "Đang tách âm thanh…"}
+              {!engineLoading &&
+                transcribeStatus === "uploading" &&
+                "Đang chuyển thành văn bản…"}
+              {!engineLoading &&
+                (transcribeStatus === "idle" ||
+                  transcribeStatus === "done" ||
+                  transcribeStatus === "error") &&
+                "Tạo phụ đề tự động"}
+            </button>
+
+            {transcribeError && (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {transcribeError}
+              </p>
+            )}
+
+            {transcript && (
+              <div className="flex max-h-64 flex-col gap-2 overflow-y-auto text-sm">
+                {transcript.segments.length > 0
+                  ? transcript.segments.map((segment, i) => (
+                      <p key={i} className="text-zinc-700 dark:text-zinc-300">
+                        <span className="text-zinc-400">
+                          [{formatSeconds(segment.start)}s -{" "}
+                          {formatSeconds(segment.end)}s]
+                        </span>{" "}
+                        {segment.text}
+                      </p>
+                    ))
+                  : transcript.text}
+              </div>
+            )}
+          </div>
 
           {outputUrl && (
             <div className="flex flex-col gap-2">
