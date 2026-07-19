@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function Home() {
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -6,10 +8,16 @@ export default function Home() {
           ChatChung
         </h1>
         <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-          Ứng dụng đang được xây dựng. Đây là trang khởi đầu (Giai đoạn 1) —
-          từ đây chúng ta sẽ thêm dần các tính năng: cắt video, gợi ý nội
-          dung, và tối ưu định dạng cho từng nền tảng.
+          Ứng dụng đang được xây dựng từng bước. Bắt đầu với tính năng đầu
+          tiên: cắt video ngay trên trình duyệt của bạn, không cần tải lên
+          máy chủ.
         </p>
+        <Link
+          href="/edit"
+          className="rounded-full bg-foreground px-6 py-3 font-medium text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+        >
+          Thử cắt video
+        </Link>
       </main>
     </div>
   );
