@@ -23,6 +23,15 @@ interface TranscriptResult {
   segments: TranscriptSegment[];
 }
 
+type SummarizeStatus = "idle" | "loading" | "done" | "error";
+
+interface SummaryResult {
+  title: string;
+  description: string;
+  hashtags: string[];
+  keep_segments: { start: number; end: number }[];
+}
+
 function formatSeconds(seconds: number) {
   return seconds.toFixed(1);
 }
@@ -42,6 +51,11 @@ export default function VideoTrimmer() {
     useState<TranscribeStatus>("idle");
   const [transcript, setTranscript] = useState<TranscriptResult | null>(null);
   const [transcribeError, setTranscribeError] = useState("");
+
+  const [summarizeStatus, setSummarizeStatus] =
+    useState<SummarizeStatus>("idle");
+  const [summary, setSummary] = useState<SummaryResult | null>(null);
+  const [summarizeError, setSummarizeError] = useState("");
 
   const [engineLoading, setEngineLoading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
@@ -189,6 +203,39 @@ export default function VideoTrimmer() {
     }
   }
 
+  async function handleSummarize() {
+    if (!transcript) return;
+
+    setSummarizeError("");
+    setSummary(null);
+    setSummarizeStatus("loading");
+
+    try {
+      const response = await fetch("/api/summarize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: transcript.text,
+          segments: transcript.segments,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error ?? "Có lỗi không xác định.");
+      }
+      setSummary(data);
+      setSummarizeStatus("done");
+    } catch (err) {
+      console.error(err);
+      setSummarizeError(
+        err instanceof Error
+          ? err.message
+          : "Có lỗi khi tạo gợi ý nội dung. Thử lại sau."
+      );
+      setSummarizeStatus("error");
+    }
+  }
+
   return (
     <div className="flex w-full max-w-xl flex-col gap-6">
       <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-zinc-300 p-8 text-center hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500">
@@ -323,6 +370,64 @@ export default function VideoTrimmer() {
                       </p>
                     ))
                   : transcript.text}
+              </div>
+            )}
+
+            {transcript && (
+              <div className="flex flex-col gap-3 border-t border-zinc-200 pt-3 dark:border-zinc-800">
+                <button
+                  onClick={handleSummarize}
+                  disabled={summarizeStatus === "loading"}
+                  className="w-fit rounded-full border border-black/[.08] px-5 py-2 text-sm font-medium hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+                >
+                  {summarizeStatus === "loading"
+                    ? "Đang tạo gợi ý…"
+                    : "Gợi ý nội dung bằng AI"}
+                </button>
+
+                {summarizeError && (
+                  <p className="text-sm text-red-600 dark:text-red-400">
+                    {summarizeError}
+                  </p>
+                )}
+
+                {summary && (
+                  <div className="flex flex-col gap-2 text-sm">
+                    <p>
+                      <span className="font-medium text-black dark:text-zinc-50">
+                        Tiêu đề gợi ý:{" "}
+                      </span>
+                      {summary.title}
+                    </p>
+                    <p>
+                      <span className="font-medium text-black dark:text-zinc-50">
+                        Mô tả gợi ý:{" "}
+                      </span>
+                      {summary.description}
+                    </p>
+                    <p>
+                      <span className="font-medium text-black dark:text-zinc-50">
+                        Hashtag:{" "}
+                      </span>
+                      {summary.hashtags.join(" ")}
+                    </p>
+                    {summary.keep_segments.length > 0 && (
+                      <div>
+                        <span className="font-medium text-black dark:text-zinc-50">
+                          Đoạn nên giữ lại:
+                        </span>
+                        <ul className="list-inside list-disc text-zinc-700 dark:text-zinc-300">
+                          {summary.keep_segments.map((seg, i) => (
+                            <li key={i}>
+                              {formatSeconds(seg.start)}s –{" "}
+                              {formatSeconds(seg.end)}s
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
