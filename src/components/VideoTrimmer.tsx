@@ -32,6 +32,36 @@ interface SummaryResult {
   keep_segments: { start: number; end: number }[];
 }
 
+type FormatStatus = "idle" | "processing" | "done" | "error";
+
+interface PlatformPreset {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+}
+
+const PLATFORM_PRESETS: PlatformPreset[] = [
+  {
+    id: "vertical",
+    label: "TikTok / YouTube Shorts / Reels (dọc 9:16)",
+    width: 720,
+    height: 1280,
+  },
+  {
+    id: "square",
+    label: "Instagram vuông (1:1)",
+    width: 720,
+    height: 720,
+  },
+  {
+    id: "horizontal",
+    label: "YouTube dài / Facebook (ngang 16:9)",
+    width: 1280,
+    height: 720,
+  },
+];
+
 function formatSeconds(seconds: number) {
   return seconds.toFixed(1);
 }
@@ -56,6 +86,14 @@ export default function VideoTrimmer() {
     useState<SummarizeStatus>("idle");
   const [summary, setSummary] = useState<SummaryResult | null>(null);
   const [summarizeError, setSummarizeError] = useState("");
+
+  const [formatStatus, setFormatStatus] = useState<FormatStatus>("idle");
+  const [formatProgress, setFormatProgress] = useState(0);
+  const [selectedPresetId, setSelectedPresetId] = useState<string | null>(
+    null
+  );
+  const [formatOutputUrl, setFormatOutputUrl] = useState<string | null>(null);
+  const [formatError, setFormatError] = useState("");
 
   const [engineLoading, setEngineLoading] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
@@ -85,7 +123,9 @@ export default function VideoTrimmer() {
       const { FFmpeg } = await import("@ffmpeg/ffmpeg");
       const ffmpeg = new FFmpeg();
       ffmpeg.on("progress", ({ progress: ratio }) => {
-        setProgress(Math.min(100, Math.round(ratio * 100)));
+        const percent = Math.min(100, Math.round(ratio * 100));
+        setProgress(percent);
+        setFormatProgress(percent);
       });
       await ffmpeg.load({
         coreURL: "/ffmpeg/ffmpeg-core.js",
@@ -233,6 +273,53 @@ export default function VideoTrimmer() {
           : "Có lỗi khi tạo gợi ý nội dung. Thử lại sau."
       );
       setSummarizeStatus("error");
+    }
+  }
+
+  async function handleFormatConvert(preset: PlatformPreset) {
+    if (!file) return;
+
+    setFormatError("");
+    setFormatOutputUrl(null);
+    setFormatProgress(0);
+    setSelectedPresetId(preset.id);
+
+    try {
+      const ffmpeg = await getFfmpeg();
+      setFormatStatus("processing");
+
+      const { fetchFile } = await import("@ffmpeg/util");
+      const inputName =
+        "fmt-src" + (file.name.match(/\.\w+$/)?.[0] ?? ".mp4");
+      const outputName = "fmt-output.mp4";
+
+      await ffmpeg.writeFile(inputName, await fetchFile(file));
+      await ffmpeg.exec([
+        "-i",
+        inputName,
+        "-vf",
+        `scale=${preset.width}:${preset.height}:force_original_aspect_ratio=increase,crop=${preset.width}:${preset.height},setsar=1`,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-c:a",
+        "aac",
+        outputName,
+      ]);
+      const data = await ffmpeg.readFile(outputName);
+      const blob = new Blob([data as BlobPart], { type: "video/mp4" });
+      setFormatOutputUrl(URL.createObjectURL(blob));
+      setFormatStatus("done");
+
+      await ffmpeg.deleteFile(inputName);
+      await ffmpeg.deleteFile(outputName);
+    } catch (err) {
+      console.error(err);
+      setFormatError(
+        "Có lỗi khi đổi định dạng video. Thử lại với video khác."
+      );
+      setFormatStatus("error");
     }
   }
 
@@ -428,6 +515,60 @@ export default function VideoTrimmer() {
                     )}
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
+            <div className="flex flex-col gap-1">
+              <p className="font-medium text-black dark:text-zinc-50">
+                Tối ưu định dạng theo nền tảng
+              </p>
+              <p className="text-sm text-zinc-500">
+                Chọn nền tảng bạn muốn đăng — video sẽ được chỉnh về đúng tỉ
+                lệ khung hình, xử lý ngay trên trình duyệt.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {PLATFORM_PRESETS.map((preset) => (
+                <button
+                  key={preset.id}
+                  onClick={() => handleFormatConvert(preset)}
+                  disabled={!file || engineLoading || formatStatus === "processing"}
+                  className="rounded-full border border-black/[.08] px-4 py-2 text-sm font-medium hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+                >
+                  {engineLoading && selectedPresetId === preset.id
+                    ? "Đang tải công cụ…"
+                    : formatStatus === "processing" &&
+                        selectedPresetId === preset.id
+                      ? `Đang xử lý… ${formatProgress}%`
+                      : preset.label}
+                </button>
+              ))}
+            </div>
+
+            {formatError && (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                {formatError}
+              </p>
+            )}
+
+            {formatOutputUrl && (
+              <div className="flex flex-col gap-2">
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                <video
+                  src={formatOutputUrl}
+                  controls
+                  className="w-full rounded-lg bg-black"
+                />
+                <a
+                  href={formatOutputUrl}
+                  download="video-toi-uu.mp4"
+                  className="w-fit rounded-full border border-black/[.08] px-5 py-2 text-sm font-medium hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+                >
+                  Tải video xuống
+                </a>
               </div>
             )}
           </div>
