@@ -75,6 +75,7 @@ export default function VideoTrimmer() {
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
+  const [outputBlob, setOutputBlob] = useState<Blob | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
 
   const [transcribeStatus, setTranscribeStatus] =
@@ -101,6 +102,7 @@ export default function VideoTrimmer() {
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const selected = e.target.files?.[0] ?? null;
     setOutputUrl(null);
+    setOutputBlob(null);
     setStatus("idle");
     setErrorMessage("");
     setFile(selected);
@@ -143,6 +145,7 @@ export default function VideoTrimmer() {
 
     setErrorMessage("");
     setOutputUrl(null);
+    setOutputBlob(null);
     setProgress(0);
 
     try {
@@ -172,6 +175,7 @@ export default function VideoTrimmer() {
       const data = await ffmpeg.readFile(outputName);
       const blob = new Blob([data as BlobPart], { type: "video/mp4" });
       setOutputUrl(URL.createObjectURL(blob));
+      setOutputBlob(blob);
       setStatus("done");
 
       await ffmpeg.deleteFile(inputName);
@@ -277,7 +281,8 @@ export default function VideoTrimmer() {
   }
 
   async function handleFormatConvert(preset: PlatformPreset) {
-    if (!file) return;
+    const sourceBlob = outputBlob ?? file;
+    if (!sourceBlob) return;
 
     setFormatError("");
     setFormatOutputUrl(null);
@@ -289,11 +294,14 @@ export default function VideoTrimmer() {
       setFormatStatus("processing");
 
       const { fetchFile } = await import("@ffmpeg/util");
-      const inputName =
-        "fmt-src" + (file.name.match(/\.\w+$/)?.[0] ?? ".mp4");
+      const inputExt =
+        sourceBlob instanceof File
+          ? (sourceBlob.name.match(/\.\w+$/)?.[0] ?? ".mp4")
+          : ".mp4";
+      const inputName = "fmt-src" + inputExt;
       const outputName = "fmt-output.mp4";
 
-      await ffmpeg.writeFile(inputName, await fetchFile(file));
+      await ffmpeg.writeFile(inputName, await fetchFile(sourceBlob));
       await ffmpeg.exec([
         "-i",
         inputName,
@@ -526,7 +534,10 @@ export default function VideoTrimmer() {
               </p>
               <p className="text-sm text-zinc-500">
                 Chọn nền tảng bạn muốn đăng — video sẽ được chỉnh về đúng tỉ
-                lệ khung hình, xử lý ngay trên trình duyệt.
+                lệ khung hình, xử lý ngay trên trình duyệt.{" "}
+                {outputBlob
+                  ? "Áp dụng cho video đã cắt ở trên."
+                  : "Bạn chưa cắt video nên sẽ áp dụng cho video gốc."}
               </p>
             </div>
 
@@ -535,7 +546,11 @@ export default function VideoTrimmer() {
                 <button
                   key={preset.id}
                   onClick={() => handleFormatConvert(preset)}
-                  disabled={!file || engineLoading || formatStatus === "processing"}
+                  disabled={
+                    (!outputBlob && !file) ||
+                    engineLoading ||
+                    formatStatus === "processing"
+                  }
                   className="rounded-full border border-black/[.08] px-4 py-2 text-sm font-medium hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
                 >
                   {engineLoading && selectedPresetId === preset.id
