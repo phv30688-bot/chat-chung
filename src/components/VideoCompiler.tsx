@@ -160,6 +160,20 @@ export default function VideoCompiler() {
     }
   }
 
+  function keepWholeClip(id: string) {
+    const clip = clips.find((c) => c.id === id);
+    if (!clip || clip.duration <= 0) return;
+
+    updateClip(id, {
+      trimmedBlob: clip.file,
+      start: 0,
+      end: clip.duration,
+      trimStatus: "idle",
+      transcript: null,
+      note: null,
+    });
+  }
+
   async function transcribeClip(clip: ClipItem): Promise<TranscriptData> {
     const ffmpeg = await getFfmpeg();
     const { fetchFile } = await import("@ffmpeg/util");
@@ -275,6 +289,13 @@ export default function VideoCompiler() {
       const ffmpeg = await getFfmpeg();
       const { fetchFile } = await import("@ffmpeg/util");
 
+      const durations = clips.map((c) => c.end - c.start);
+      // Độ dài hiệu ứng chuyển cảnh: không dài hơn 1/3 đoạn ngắn nhất, để tránh lỗi khi có đoạn rất ngắn.
+      const fadeDuration = Math.max(
+        0.15,
+        Math.min(0.5, Math.min(...durations) / 3)
+      );
+
       const normalizedNames: string[] = [];
       for (let i = 0; i < clips.length; i++) {
         const srcName = `c${i}-src.mp4`;
@@ -299,19 +320,43 @@ export default function VideoCompiler() {
         normalizedNames.push(normName);
       }
 
-      const listContent = normalizedNames.map((n) => `file '${n}'`).join("\n");
-      await ffmpeg.writeFile("concat_list.txt", new TextEncoder().encode(listContent));
+      // Nối các đoạn bằng hiệu ứng tan hình (xfade/acrossfade) thay vì cắt cứng,
+      // để chuyển cảnh giữa các video mượt hơn.
+      let videoLabel = "0:v";
+      let audioLabel = "0:a";
+      let runningDuration = durations[0];
+      const filterParts: string[] = [];
+      for (let i = 1; i < clips.length; i++) {
+        const offset = Math.max(0, runningDuration - fadeDuration);
+        const nextVideoLabel = `v${i}`;
+        const nextAudioLabel = `a${i}`;
+        filterParts.push(
+          `[${videoLabel}][${i}:v]xfade=transition=fade:duration=${fadeDuration.toFixed(3)}:offset=${offset.toFixed(3)}[${nextVideoLabel}]`
+        );
+        filterParts.push(
+          `[${audioLabel}][${i}:a]acrossfade=d=${fadeDuration.toFixed(3)}[${nextAudioLabel}]`
+        );
+        videoLabel = nextVideoLabel;
+        audioLabel = nextAudioLabel;
+        runningDuration = runningDuration + durations[i] - fadeDuration;
+      }
 
+      const inputArgs = normalizedNames.flatMap((name) => ["-i", name]);
       const finalName = "final.mp4";
       await ffmpeg.exec([
-        "-f",
-        "concat",
-        "-safe",
-        "0",
-        "-i",
-        "concat_list.txt",
-        "-c",
-        "copy",
+        ...inputArgs,
+        "-filter_complex",
+        filterParts.join(";"),
+        "-map",
+        `[${videoLabel}]`,
+        "-map",
+        `[${audioLabel}]`,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-c:a",
+        "aac",
         finalName,
       ]);
 
@@ -323,7 +368,6 @@ export default function VideoCompiler() {
       for (const name of normalizedNames) {
         await ffmpeg.deleteFile(name);
       }
-      await ffmpeg.deleteFile("concat_list.txt");
       await ffmpeg.deleteFile(finalName);
     } catch (err) {
       console.error(err);
@@ -432,23 +476,30 @@ export default function VideoCompiler() {
             </div>
           )}
 
-          <button
-            onClick={() => trimClip(clip.id)}
-            disabled={
-              clip.end <= clip.start ||
-              engineLoading ||
-              clip.trimStatus === "processing"
-            }
-            className="w-fit rounded-full border border-black/[.08] px-4 py-2 text-sm font-medium hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
-          >
-            {engineLoading
-              ? "Đang tải công cụ…"
-              : clip.trimStatus === "processing"
-                ? "Đang cắt…"
-                : clip.trimmedBlob
-                  ? "Cắt lại đoạn này"
-                  : "Cắt đoạn này"}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => trimClip(clip.id)}
+              disabled={
+                clip.end <= clip.start ||
+                engineLoading ||
+                clip.trimStatus === "processing"
+              }
+              className="w-fit rounded-full border border-black/[.08] px-4 py-2 text-sm font-medium hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+            >
+              {engineLoading
+                ? "Đang tải công cụ…"
+                : clip.trimStatus === "processing"
+                  ? "Đang cắt…"
+                  : "Chỉ dùng đoạn đã chọn"}
+            </button>
+            <button
+              onClick={() => keepWholeClip(clip.id)}
+              disabled={clip.duration <= 0}
+              className="w-fit rounded-full border border-black/[.08] px-4 py-2 text-sm font-medium hover:bg-black/[.04] disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+            >
+              Giữ nguyên cả video
+            </button>
+          </div>
 
           {clip.trimStatus === "error" && (
             <p className="text-sm text-red-600 dark:text-red-400">
@@ -457,7 +508,9 @@ export default function VideoCompiler() {
           )}
           {clip.trimmedBlob && (
             <p className="text-sm text-green-700 dark:text-green-400">
-              Đã cắt xong ({formatSeconds(clip.end - clip.start)}s)
+              {clip.end - clip.start >= clip.duration - 0.05
+                ? `Sẽ dùng toàn bộ video (${formatSeconds(clip.duration)}s)`
+                : `Đã chọn đoạn ${formatSeconds(clip.end - clip.start)}s`}
             </p>
           )}
           {clip.note && (
@@ -528,9 +581,15 @@ export default function VideoCompiler() {
 
       {clips.length >= 2 && (
         <div className="flex flex-col gap-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-          <p className="font-medium text-black dark:text-zinc-50">
-            Ghép thành video
-          </p>
+          <div className="flex flex-col gap-1">
+            <p className="font-medium text-black dark:text-zinc-50">
+              Ghép thành video
+            </p>
+            <p className="text-sm text-zinc-500">
+              Các đoạn sẽ được nối bằng hiệu ứng tan hình (crossfade) cho
+              chuyển cảnh mượt hơn, thay vì cắt cứng.
+            </p>
+          </div>
 
           <div className="flex flex-wrap gap-2">
             {PLATFORM_PRESETS.map((preset) => (
