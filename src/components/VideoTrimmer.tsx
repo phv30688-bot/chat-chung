@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import type { FFmpeg } from "@ffmpeg/ffmpeg";
+import { PLATFORM_PRESETS, type PlatformPreset } from "@/lib/platformPresets";
 
 type Status = "idle" | "processing" | "done" | "error";
 
@@ -33,34 +34,6 @@ interface SummaryResult {
 }
 
 type FormatStatus = "idle" | "processing" | "done" | "error";
-
-interface PlatformPreset {
-  id: string;
-  label: string;
-  width: number;
-  height: number;
-}
-
-const PLATFORM_PRESETS: PlatformPreset[] = [
-  {
-    id: "vertical",
-    label: "TikTok / YouTube Shorts / Reels (dọc 9:16)",
-    width: 720,
-    height: 1280,
-  },
-  {
-    id: "square",
-    label: "Instagram vuông (1:1)",
-    width: 720,
-    height: 720,
-  },
-  {
-    id: "horizontal",
-    label: "YouTube dài / Facebook (ngang 16:9)",
-    width: 1280,
-    height: 720,
-  },
-];
 
 function formatSeconds(seconds: number) {
   return seconds.toFixed(1);
