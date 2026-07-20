@@ -25,8 +25,34 @@ interface ClipItem {
 type PlanStatus = "idle" | "transcribing" | "planning" | "done" | "error";
 type CompileStatus = "idle" | "processing" | "done" | "error";
 
+interface TransitionOption {
+  id: string;
+  label: string;
+  xfade: string;
+}
+
+const TRANSITION_OPTIONS: TransitionOption[] = [
+  { id: "fade", label: "Tan hình", xfade: "fade" },
+  { id: "dissolve", label: "Hoà tan", xfade: "dissolve" },
+  { id: "wipeleft", label: "Trượt trái", xfade: "wipeleft" },
+  { id: "circleopen", label: "Mở vòng tròn", xfade: "circleopen" },
+  { id: "zoomin", label: "Phóng to dần", xfade: "zoomin" },
+];
+
+const OVERLAY_FONT_URL = "/fonts/DejaVuSans-Bold.ttf";
+const MAX_OVERLAY_TEXT_LENGTH = 60;
+
 function formatSeconds(seconds: number) {
   return seconds.toFixed(1);
+}
+
+function escapeDrawtext(text: string) {
+  return text
+    .slice(0, MAX_OVERLAY_TEXT_LENGTH)
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "’")
+    .replace(/:/g, "\\:")
+    .replace(/%/g, "\\%");
 }
 
 function makeId() {
@@ -48,6 +74,10 @@ export default function VideoCompiler() {
   const [selectedPresetId, setSelectedPresetId] = useState(
     PLATFORM_PRESETS[2].id
   );
+  const [selectedTransitionId, setSelectedTransitionId] = useState(
+    TRANSITION_OPTIONS[0].id
+  );
+  const [overlayText, setOverlayText] = useState("");
   const [compileStatus, setCompileStatus] = useState<CompileStatus>("idle");
   const [compileProgress, setCompileProgress] = useState(0);
   const [compileError, setCompileError] = useState("");
@@ -265,6 +295,7 @@ export default function VideoCompiler() {
         }));
       });
       setPlanTitle(data.title ?? null);
+      setOverlayText((prev) => prev || data.title || "");
       setPlanStatus("done");
     } catch (err) {
       console.error(err);
@@ -277,7 +308,7 @@ export default function VideoCompiler() {
     }
   }
 
-  async function handleCompile(preset: PlatformPreset) {
+  async function handleCompile(preset: PlatformPreset, transition: TransitionOption) {
     if (!allTrimmed) return;
 
     setCompileError("");
@@ -288,6 +319,11 @@ export default function VideoCompiler() {
     try {
       const ffmpeg = await getFfmpeg();
       const { fetchFile } = await import("@ffmpeg/util");
+
+      const trimmedOverlayText = overlayText.trim();
+      if (trimmedOverlayText) {
+        await ffmpeg.writeFile("overlay-font.ttf", await fetchFile(OVERLAY_FONT_URL));
+      }
 
       const durations = clips.map((c) => c.end - c.start);
       // Độ dài hiệu ứng chuyển cảnh: không dài hơn 1/3 đoạn ngắn nhất, để tránh lỗi khi có đoạn rất ngắn.
@@ -331,7 +367,7 @@ export default function VideoCompiler() {
         const nextVideoLabel = `v${i}`;
         const nextAudioLabel = `a${i}`;
         filterParts.push(
-          `[${videoLabel}][${i}:v]xfade=transition=fade:duration=${fadeDuration.toFixed(3)}:offset=${offset.toFixed(3)}[${nextVideoLabel}]`
+          `[${videoLabel}][${i}:v]xfade=transition=${transition.xfade}:duration=${fadeDuration.toFixed(3)}:offset=${offset.toFixed(3)}[${nextVideoLabel}]`
         );
         filterParts.push(
           `[${audioLabel}][${i}:a]acrossfade=d=${fadeDuration.toFixed(3)}[${nextAudioLabel}]`
@@ -339,6 +375,14 @@ export default function VideoCompiler() {
         videoLabel = nextVideoLabel;
         audioLabel = nextAudioLabel;
         runningDuration = runningDuration + durations[i] - fadeDuration;
+      }
+
+      if (trimmedOverlayText) {
+        const escaped = escapeDrawtext(trimmedOverlayText);
+        filterParts.push(
+          `[${videoLabel}]drawtext=fontfile=overlay-font.ttf:text='${escaped}':fontsize=${Math.round(preset.width / 18)}:fontcolor=white:box=1:boxcolor=black@0.5:boxborderw=16:x=(w-text_w)/2:y=h-text_h-60[vtext]`
+        );
+        videoLabel = "vtext";
       }
 
       const inputArgs = normalizedNames.flatMap((name) => ["-i", name]);
@@ -369,6 +413,9 @@ export default function VideoCompiler() {
         await ffmpeg.deleteFile(name);
       }
       await ffmpeg.deleteFile(finalName);
+      if (trimmedOverlayText) {
+        await ffmpeg.deleteFile("overlay-font.ttf");
+      }
     } catch (err) {
       console.error(err);
       setCompileError(
@@ -586,8 +633,7 @@ export default function VideoCompiler() {
               Ghép thành video
             </p>
             <p className="text-sm text-zinc-500">
-              Các đoạn sẽ được nối bằng hiệu ứng tan hình (crossfade) cho
-              chuyển cảnh mượt hơn, thay vì cắt cứng.
+              Video xuất ra ở độ phân giải Full HD (1080p).
             </p>
           </div>
 
@@ -607,11 +653,47 @@ export default function VideoCompiler() {
             ))}
           </div>
 
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-zinc-500">Kiểu chuyển cảnh giữa các đoạn:</p>
+            <div className="flex flex-wrap gap-2">
+              {TRANSITION_OPTIONS.map((transition) => (
+                <button
+                  key={transition.id}
+                  onClick={() => setSelectedTransitionId(transition.id)}
+                  className={`rounded-full border px-4 py-2 text-sm font-medium ${
+                    selectedTransitionId === transition.id
+                      ? "border-foreground bg-foreground text-background"
+                      : "border-black/[.08] hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+                  }`}
+                >
+                  {transition.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-sm text-zinc-500">
+              Chữ hiển thị trên video (không bắt buộc, tối đa{" "}
+              {MAX_OVERLAY_TEXT_LENGTH} ký tự):
+            </span>
+            <input
+              type="text"
+              value={overlayText}
+              maxLength={MAX_OVERLAY_TEXT_LENGTH}
+              onChange={(e) => setOverlayText(e.target.value)}
+              placeholder="Ví dụ: Chuyến du lịch Đà Lạt"
+              className="rounded-lg border border-zinc-300 bg-transparent px-3 py-2 text-sm dark:border-zinc-700"
+            />
+          </label>
+
           <button
             onClick={() =>
               handleCompile(
                 PLATFORM_PRESETS.find((p) => p.id === selectedPresetId) ??
-                  PLATFORM_PRESETS[0]
+                  PLATFORM_PRESETS[0],
+                TRANSITION_OPTIONS.find((t) => t.id === selectedTransitionId) ??
+                  TRANSITION_OPTIONS[0]
               )
             }
             disabled={
