@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
+import { checkUsageLimit, recordUsage, usageLimitResponse } from "@/lib/usageLimit";
 
 export const runtime = "nodejs";
 
@@ -46,6 +47,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const { allowed, count } = checkUsageLimit(req);
+  if (!allowed) {
+    return usageLimitResponse();
+  }
+
   const body = await req.json();
   const segments: TranscriptSegment[] = body?.segments ?? [];
   const fullText: string = body?.text ?? "";
@@ -67,7 +73,7 @@ export async function POST(req: NextRequest) {
 
   const client = new Anthropic({ apiKey });
 
-  const response = await client.messages.create({
+  const aiResponse = await client.messages.create({
     model: "claude-haiku-4-5",
     max_tokens: 1024,
     system:
@@ -83,7 +89,7 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const textBlock = response.content.find((b) => b.type === "text");
+  const textBlock = aiResponse.content.find((b) => b.type === "text");
   if (!textBlock || textBlock.type !== "text") {
     return NextResponse.json(
       { error: "Claude không trả về kết quả hợp lệ." },
@@ -92,5 +98,7 @@ export async function POST(req: NextRequest) {
   }
 
   const result = JSON.parse(textBlock.text);
-  return NextResponse.json(result);
+  const res = NextResponse.json(result);
+  recordUsage(res, count);
+  return res;
 }

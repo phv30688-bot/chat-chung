@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkUsageLimit, recordUsage, usageLimitResponse } from "@/lib/usageLimit";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,11 @@ export async function POST(req: NextRequest) {
       { error: "Server chưa cấu hình GROQ_API_KEY." },
       { status: 500 }
     );
+  }
+
+  const { allowed, count } = checkUsageLimit(req);
+  if (!allowed) {
+    return usageLimitResponse();
   }
 
   const incomingForm = await req.formData();
@@ -51,7 +57,7 @@ export async function POST(req: NextRequest) {
   }
 
   const data: GroqTranscription = await groqResponse.json();
-  return NextResponse.json({
+  const response = NextResponse.json({
     text: data.text,
     segments: (data.segments ?? []).map((s) => ({
       start: s.start,
@@ -59,4 +65,6 @@ export async function POST(req: NextRequest) {
       text: s.text,
     })),
   });
+  recordUsage(response, count);
+  return response;
 }
