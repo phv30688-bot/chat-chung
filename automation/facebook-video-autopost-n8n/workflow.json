@@ -1,0 +1,425 @@
+{
+  "name": "VTGold_ACTGold_AutoVideo_Facebook",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1840, 300],
+      "id": "trg-schedule-video",
+      "name": "Lịch tạo video hằng ngày (8h sáng)"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "San_Pham_Video",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1620, 300],
+      "id": "sheet-read-products",
+      "name": "Đọc danh sách sản phẩm chờ làm video",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = items.map(i => i.json);\nconst next = rows.find(r => !r['Trạng thái'] || String(r['Trạng thái']).trim() === '');\nreturn next ? [{ json: next }] : [];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1400, 300],
+      "id": "code-pick-next-product",
+      "name": "Chọn sản phẩm tiếp theo"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là chuyên gia sáng tạo nội dung video ngắn cho thương hiệu quà tặng dát vàng cao cấp V&T Gold / ACT Gold (quatangdatvang.com). Cho sản phẩm dưới đây, hãy viết:\n\n1. Một dòng chữ ngắn (overlay_text) tối đa 45 ký tự, gây ấn tượng, sẽ hiện đè lên video slideshow ảnh sản phẩm (không dùng dấu ngoặc kép, không icon).\n2. Một đoạn caption đầy đủ (caption) để đăng kèm video lên Facebook: 100-180 từ, giọng thân thiện, sang trọng vừa phải, nêu bật giá trị/ý nghĩa món quà, kết thúc mời khách inbox tư vấn, KHÔNG dùng hashtag, KHÔNG bịa số điện thoại.\n\nTrả về ĐÚNG định dạng JSON trong khối ```json```, không thêm chữ nào khác:\n```json\n{\n  \"overlay_text\": \"...\",\n  \"caption\": \"...\"\n}\n```\n\nThông tin sản phẩm:\nTên: {{ $json['Tên sản phẩm'] }}\nLink: {{ $json['Link sản phẩm'] }}\n",
+        "hasOutputParser": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [-1180, 300],
+      "id": "llm-write-video-copy",
+      "name": "Viết caption & chữ trên video",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-001",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [-1092, 520],
+      "id": "gemini-model-video",
+      "name": "Gemini - Viết video copy",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gemini API - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let rawText = $json.text || '';\n\nconst matched = rawText.match(/```json\\s*([\\s\\S]*?)\\s*```/);\nconst source = matched && matched[1] ? matched[1] : rawText;\n\nlet jsonString = source\n  .replace(/\\n/g, '')\n  .replace(/\\r/g, '')\n  .replace(/\\t/g, '')\n  .trim();\n\ntry {\n  const parsed = JSON.parse(jsonString);\n  return [{\n    json: {\n      overlay_text: parsed.overlay_text || '',\n      caption: parsed.caption || ''\n    }\n  }];\n} catch (err) {\n  return [{\n    json: { overlay_text: '', caption: '', error: 'Lỗi parse JSON: ' + err.message }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-804, 300],
+      "id": "code-parse-video-copy",
+      "name": "Tách JSON caption"
+    },
+    {
+      "parameters": {
+        "jsCode": "const product = $('Chọn sản phẩm tiếp theo').item.json;\nconst ai = $json;\n\nconst images = ['Ảnh 1', 'Ảnh 2', 'Ảnh 3', 'Ảnh 4', 'Ảnh 5']\n  .map(col => product[col])\n  .filter(Boolean);\n\nif (images.length === 0) {\n  throw new Error('Sản phẩm \"' + product['Tên sản phẩm'] + '\" chưa có ảnh trong Sheet (cột Ảnh 1..5).');\n}\n\nconst modifications = {};\nimages.forEach((url, idx) => {\n  modifications[`Image-${idx + 1}.source`] = url;\n});\nmodifications['Text-ProductName.text'] = product['Tên sản phẩm'];\nmodifications['Text-Overlay.text'] = ai.overlay_text;\nmodifications['Text-CTA.text'] = 'V&T Gold - Qua tang dat vang cao cap';\n\nreturn [{\n  json: {\n    body: {\n      template_id: 'YOUR_CREATOMATE_TEMPLATE_ID',\n      modifications,\n      webhook_url: 'https://YOUR_N8N_DOMAIN/webhook/creatomate-video-done',\n      metadata: JSON.stringify({\n        row_key: product['Link sản phẩm'],\n        product_name: product['Tên sản phẩm'],\n        caption: ai.caption\n      })\n    },\n    row_key: product['Link sản phẩm']\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-584, 300],
+      "id": "code-build-creatomate-request",
+      "name": "Chuẩn bị dữ liệu gửi Creatomate"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.creatomate.com/v1/renders",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-364, 300],
+      "id": "http-request-creatomate-render",
+      "name": "Gửi yêu cầu dựng video (Creatomate)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Creatomate API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "San_Pham_Video",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Link sản phẩm": "={{ $('Chuẩn bị dữ liệu gửi Creatomate').item.json.row_key }}",
+            "Trạng thái": "Đang dựng video"
+          },
+          "matchingColumns": ["Link sản phẩm"],
+          "schema": [
+            { "id": "Link sản phẩm", "displayName": "Link sản phẩm", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Trạng thái", "displayName": "Trạng thái", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-144, 300],
+      "id": "sheet-mark-rendering",
+      "name": "Đánh dấu \"đang dựng video\"",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "creatomate-video-done",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1840, 700],
+      "id": "trg-webhook-creatomate",
+      "name": "Nhận kết quả dựng video (Creatomate)",
+      "webhookId": "REPLACE_AUTO_GENERATED_ON_IMPORT"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $json.body || $json;\nlet meta = {};\ntry { meta = JSON.parse(data.metadata || '{}'); } catch (e) {}\n\nreturn [{\n  json: {\n    status: data.status,\n    url: data.url,\n    row_key: meta.row_key || '',\n    product_name: meta.product_name || '',\n    caption: meta.caption || ''\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1620, 700],
+      "id": "code-parse-webhook",
+      "name": "Đọc dữ liệu webhook Creatomate"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-render-ok",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "succeeded",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1400, 700],
+      "id": "if-render-succeeded",
+      "name": "Dựng video thành công?"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v22.0",
+        "node": "YOUR_FACEBOOK_PAGE_ID",
+        "edge": "videos",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              { "name": "file_url", "value": "={{ $json.url }}" },
+              { "name": "description", "value": "={{ $json.caption }}" },
+              { "name": "published", "value": "false" },
+              { "name": "scheduled_publish_time", "value": "={{ Math.floor(Date.now() / 1000) + 1800 }}" }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [-1180, 620],
+      "id": "fb-upload-video",
+      "name": "Đăng video lên Fanpage (nháp, hẹn giờ 30 phút)",
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Facebook Graph API - VTGold Page"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "San_Pham_Video",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Link sản phẩm": "={{ $('Đọc dữ liệu webhook Creatomate').item.json.row_key }}",
+            "Trạng thái": "Đã đăng",
+            "Ngày đăng": "={{ new Date().toLocaleDateString('vi-VN') }}",
+            "Link video": "={{ $('Đọc dữ liệu webhook Creatomate').item.json.url }}"
+          },
+          "matchingColumns": ["Link sản phẩm"],
+          "schema": [
+            { "id": "Link sản phẩm", "displayName": "Link sản phẩm", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Trạng thái", "displayName": "Trạng thái", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Ngày đăng", "displayName": "Ngày đăng", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Link video", "displayName": "Link video", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-960, 620],
+      "id": "sheet-mark-posted",
+      "name": "Cập nhật \"đã đăng\"",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "phv30688@gmail.com",
+        "subject": "✅ Đã tạo video mới cho fanpage Quà tặng dát vàng",
+        "message": "=✅ Video sẽ tự động công khai sau 30 phút nữa!\n🎬 Sản phẩm: {{ $('Đọc dữ liệu webhook Creatomate').item.json.product_name }}\n🎞️ Video gốc: {{ $('Đọc dữ liệu webhook Creatomate').item.json.url }}\n📄 Video ID trên Facebook: {{ $json.id }}",
+        "options": { "appendAttribution": false }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [-740, 620],
+      "id": "gmail-notify-success",
+      "name": "Gửi email thông báo",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gmail - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "San_Pham_Video",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Link sản phẩm": "={{ $('Đọc dữ liệu webhook Creatomate').item.json.row_key }}",
+            "Trạng thái": "Lỗi dựng video"
+          },
+          "matchingColumns": ["Link sản phẩm"],
+          "schema": [
+            { "id": "Link sản phẩm", "displayName": "Link sản phẩm", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Trạng thái", "displayName": "Trạng thái", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1400, 900],
+      "id": "sheet-mark-error",
+      "name": "Đánh dấu \"lỗi dựng video\"",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "phv30688@gmail.com",
+        "subject": "❌ Lỗi dựng video tự động",
+        "message": "=Video cho sản phẩm \"{{ $('Đọc dữ liệu webhook Creatomate').item.json.product_name }}\" bị lỗi khi dựng (trạng thái: {{ $('Đọc dữ liệu webhook Creatomate').item.json.status }}).\nVui lòng kiểm tra lại template Creatomate và ảnh sản phẩm trong Sheet, sau đó xoá dòng \"Trạng thái\" của sản phẩm đó để hệ thống thử lại vào lần chạy tiếp theo.",
+        "options": { "appendAttribution": false }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [-1180, 900],
+      "id": "gmail-notify-error",
+      "name": "Báo lỗi dựng video",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gmail - VTGold"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Lịch tạo video hằng ngày (8h sáng)": {
+      "main": [[{ "node": "Đọc danh sách sản phẩm chờ làm video", "type": "main", "index": 0 }]]
+    },
+    "Đọc danh sách sản phẩm chờ làm video": {
+      "main": [[{ "node": "Chọn sản phẩm tiếp theo", "type": "main", "index": 0 }]]
+    },
+    "Chọn sản phẩm tiếp theo": {
+      "main": [[{ "node": "Viết caption & chữ trên video", "type": "main", "index": 0 }]]
+    },
+    "Viết caption & chữ trên video": {
+      "main": [[{ "node": "Tách JSON caption", "type": "main", "index": 0 }]]
+    },
+    "Gemini - Viết video copy": {
+      "ai_languageModel": [[{ "node": "Viết caption & chữ trên video", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Tách JSON caption": {
+      "main": [[{ "node": "Chuẩn bị dữ liệu gửi Creatomate", "type": "main", "index": 0 }]]
+    },
+    "Chuẩn bị dữ liệu gửi Creatomate": {
+      "main": [[{ "node": "Gửi yêu cầu dựng video (Creatomate)", "type": "main", "index": 0 }]]
+    },
+    "Gửi yêu cầu dựng video (Creatomate)": {
+      "main": [[{ "node": "Đánh dấu \"đang dựng video\"", "type": "main", "index": 0 }]]
+    },
+    "Nhận kết quả dựng video (Creatomate)": {
+      "main": [[{ "node": "Đọc dữ liệu webhook Creatomate", "type": "main", "index": 0 }]]
+    },
+    "Đọc dữ liệu webhook Creatomate": {
+      "main": [[{ "node": "Dựng video thành công?", "type": "main", "index": 0 }]]
+    },
+    "Dựng video thành công?": {
+      "main": [
+        [{ "node": "Đăng video lên Fanpage (nháp, hẹn giờ 30 phút)", "type": "main", "index": 0 }],
+        [{ "node": "Đánh dấu \"lỗi dựng video\"", "type": "main", "index": 0 }]
+      ]
+    },
+    "Đăng video lên Fanpage (nháp, hẹn giờ 30 phút)": {
+      "main": [[{ "node": "Cập nhật \"đã đăng\"", "type": "main", "index": 0 }]]
+    },
+    "Cập nhật \"đã đăng\"": {
+      "main": [[{ "node": "Gửi email thông báo", "type": "main", "index": 0 }]]
+    },
+    "Đánh dấu \"lỗi dựng video\"": {
+      "main": [[{ "node": "Báo lỗi dựng video", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}
