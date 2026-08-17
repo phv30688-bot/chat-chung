@@ -1,0 +1,625 @@
+{
+  "name": "VTGold_ACTGold_AutoPost_Facebook",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1840, 300],
+      "id": "trg-schedule-01",
+      "name": "Lịch đăng tự động (9h sáng)"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Lich_Dang",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "Ngày",
+              "lookupValue": "={{ $now.toFormat(\"dd/MM/yyyy\") }}"
+            },
+            {
+              "lookupColumn": "Giờ",
+              "lookupValue": "={{ $now.toFormat(\"HH\") }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1620, 300],
+      "id": "sheet-read-01",
+      "name": "Đọc lịch đăng hôm nay",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "formTitle": "V&T Gold / ACT Gold - Gửi nội dung đăng Facebook",
+        "formDescription": "Nhập ý tưởng / nội dung bạn muốn AI viết lại và đăng lên fanpage Quà tặng dát vàng.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Nội dung / ý tưởng bài viết",
+              "fieldType": "textarea",
+              "placeholder": "Ví dụ: giới thiệu bộ tranh dát vàng 24K tặng khai trương, ưu đãi quà tặng doanh nghiệp cuối năm...",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {
+          "appendAttribution": false,
+          "buttonLabel": "Gửi nội dung",
+          "respondWithOptions": {
+            "values": {
+              "formSubmittedText": "Nội dung đã được gửi, hệ thống sẽ xử lý và tạo bài đăng."
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [-1840, 620],
+      "id": "trg-form-01",
+      "name": "Form nhận nội dung thủ công",
+      "webhookId": "REPLACE_AUTO_GENERATED_ON_IMPORT"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Dang_Ngay",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Ngày": "={{ $now.toFormat(\"dd/MM/yyyy\") }}",
+            "Giờ": "={{ $now.toFormat(\"HH\") }}",
+            "Nội dung": "={{ $json['Nội dung / ý tưởng bài viết'] }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Ngày", "displayName": "Ngày", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Giờ", "displayName": "Giờ", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Nội dung", "displayName": "Nội dung", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-1620, 620],
+      "id": "sheet-append-01",
+      "name": "Lưu nội dung từ Form",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-if-01",
+              "leftValue": "={{ ($json[\"Nội dung\"] || \"\").length > 0 || ($json[\"Nội dung / ý tưởng bài viết\"] || \"\").length >= 30 }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-1400, 460],
+      "id": "if-has-content",
+      "name": "Có nội dung hợp lệ?"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là chuyên gia content marketing cho ngành quà tặng cao cấp dát vàng 24K (thương hiệu V&T Gold / ACT Gold - quatangdatvang.com). Dưới đây là nội dung đầu vào. Hãy làm 3 việc:\n\n1. Phân tích nhanh nội dung.\n2. Gạch đầu dòng các ý chính nổi bật để viết bài social media.\n3. Trả về ĐÚNG định dạng JSON sau, không giải thích gì thêm, không thêm nội dung nào ngoài khối ```json```:\n\n```json\n{\n  \"prompt_image\": \"...\",\n  \"content\": \"...\"\n}\n```\n\n\"prompt_image\": viết prompt tạo ảnh AI mô tả sản phẩm quà tặng dát vàng (tranh dát vàng, tượng mạ vàng, hộp quà dát vàng 24K...) phong cách chụp sản phẩm sang trọng, ánh sáng ấm, nền tối hoặc gỗ cao cấp, bố cục vuông. Tuyệt đối KHÔNG mô tả chữ/số xuất hiện trong ảnh, chỉ mô tả hình ảnh và phong cách.\n\n\"content\": nội dung viết bài hoàn chỉnh, rõ ràng, ngắn gọn, đúng trọng tâm, phù hợp đăng Facebook/website.\n\nNội dung cần xử lý:\n\"\"\"\n{{ $json[\"Nội dung\"]?.trim() ? $json[\"Nội dung\"] : ($json[\"Nội dung / ý tưởng bài viết\"] || \"\") }}\n\"\"\"\n",
+        "hasOutputParser": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [-1180, 460],
+      "id": "llm-analyze",
+      "name": "Phân tích & tạo prompt ảnh",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-001",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [-1092, 680],
+      "id": "gemini-model-1",
+      "name": "Gemini - Phân tích",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gemini API - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let rawText = $json.text || '';\n\nconst matched = rawText.match(/```json\\s*([\\s\\S]*?)\\s*```/);\nconst source = matched && matched[1] ? matched[1] : rawText;\n\nlet jsonString = source\n  .replace(/\\n/g, '')\n  .replace(/\\r/g, '')\n  .replace(/\\t/g, '')\n  .trim();\n\ntry {\n  const parsed = JSON.parse(jsonString);\n  return [{\n    json: {\n      prompt_image: parsed.prompt_image || '',\n      content: parsed.content || ''\n    }\n  }];\n} catch (err) {\n  return [{\n    json: {\n      prompt_image: '',\n      content: '',\n      error: 'Lỗi parse JSON: ' + err.message\n    }\n  }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-804, 460],
+      "id": "code-parse-json",
+      "name": "Tách JSON từ AI"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-if2-01",
+              "leftValue": "={{ !!$json.prompt_image }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-584, 300],
+      "id": "if-has-prompt-image",
+      "name": "Có prompt ảnh AI?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/nscale/v1/images/generations",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"response_format\": \"b64_json\",\n  \"prompt\": \"{{ $json.prompt_image }}\",\n  \"model\": \"black-forest-labs/FLUX.1-schnell\"\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-286, 200],
+      "id": "http-image-gen",
+      "name": "Tạo ảnh AI (FLUX)",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Hugging Face API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const base64Data = $json.data?.[0]?.b64_json;\n\nif (!base64Data) {\n  throw new Error(\"Không tìm thấy dữ liệu ảnh base64.\");\n}\n\nreturn [\n  {\n    json: {},\n    binary: {\n      data: {\n        data: base64Data,\n        mimeType: \"image/png\",\n        fileName: \"vtgold-image.png\"\n      }\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [12, 200],
+      "id": "code-b64-to-file",
+      "name": "Chuyển base64 thành file",
+      "alwaysOutputData": true,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v22.0",
+        "node": "YOUR_FACEBOOK_PAGE_ID",
+        "edge": "photos",
+        "sendBinaryData": true,
+        "binaryPropertyName": "data",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              { "name": "published", "value": "false" }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [232, 200],
+      "id": "fb-upload-ai-image",
+      "name": "Đăng ảnh AI lên FB (chưa publish)",
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Facebook Graph API - VTGold Page"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "'YOUR_DRIVE_FOLDER_ID' in parents and mimeType contains 'image/' and trashed = false",
+        "returnAll": true,
+        "filter": {
+          "driveId": {
+            "__rl": true,
+            "value": "My Drive",
+            "mode": "list",
+            "cachedResultName": "My Drive"
+          }
+        },
+        "options": { "fields": ["id"] }
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [-286, 400],
+      "id": "drive-search-images",
+      "name": "Lấy ảnh sản phẩm từ Drive (fallback)",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Drive - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = items.map(item => item.json);\nfiles.sort((a, b) => new Date(b.modifiedTime) - new Date(a.modifiedTime));\nreturn [{ json: files[0] }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [12, 400],
+      "id": "code-pick-latest-image",
+      "name": "Chọn 1 ảnh mới nhất"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v22.0",
+        "node": "YOUR_FACEBOOK_PAGE_ID",
+        "edge": "photos",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              { "name": "published", "value": "false" },
+              { "name": "url", "value": "=https://drive.google.com/uc?export=download&id={{ $json.id }}" }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [232, 400],
+      "id": "fb-upload-drive-image",
+      "name": "Đăng ảnh Drive lên FB (chưa publish)",
+      "alwaysOutputData": true,
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Facebook Graph API - VTGold Page"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Bạn là chuyên gia viết nội dung truyền thông xã hội cho thương hiệu quà tặng dát vàng cao cấp V&T Gold / ACT Gold. Dưới đây là nội dung sơ lược đã được AI phân tích. Hãy chuyển thành MỘT bài viết hoàn chỉnh:\n\n1. Giữ nguyên tinh thần và thông điệp chính.\n2. Viết mạch lạc, có mở đầu - thân bài - kết luận rõ ràng, nhấn vào ý nghĩa/giá trị món quà dát vàng (tặng khai trương, tân gia, đối tác, lễ Tết, sự kiện doanh nghiệp...).\n3. Giọng văn thân thiện, sang trọng vừa phải, dễ hiểu, phù hợp Facebook.\n4. Dùng emoji vừa phải nếu phù hợp.\n5. Độ dài 200-350 từ.\n6. Không chèn tiêu đề, không dùng #hashtag.\n7. Kết bài mời khách để lại bình luận hoặc inbox fanpage để được tư vấn, KHÔNG bịa số điện thoại/địa chỉ.\n\nNội dung sơ lược:\n\"\"\"\n{{ $json.content }}\n\"\"\"\n"
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.6,
+      "position": [-364, 700],
+      "id": "llm-full-post",
+      "name": "Viết bài đầy đủ",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-001",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [-276, 920],
+      "id": "gemini-model-2",
+      "name": "Gemini - Viết bài",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gemini API - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Nhat_Ky_Tu_Dong",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Ngày": "={{ new Date().toLocaleDateString(\"vi-VN\") }}",
+            "Nội dung ngắn": "={{ $('Tách JSON từ AI').item.json.content }}",
+            "Nội dung đầy đủ": "={{ $json.text?.trim() ? $json.text : $json.content }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            { "id": "Ngày", "displayName": "Ngày", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Nội dung ngắn", "displayName": "Nội dung ngắn", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true },
+            { "id": "Nội dung đầy đủ", "displayName": "Nội dung đầy đủ", "type": "string", "display": true, "required": false, "defaultMatch": false, "canBeUsedToMatch": true }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-84, 700],
+      "id": "sheet-log-post",
+      "name": "Lưu nhật ký bài đăng",
+      "alwaysOutputData": true,
+      "retryOnFail": false,
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Google Sheets - VTGold"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "const raw = $json[\"Nội dung đầy đủ\"] || $json.text || $json.content || \"\";\nconst cleaned = raw.replace(/[#*]+/g, \"\").trim();\n\nreturn [\n  {\n    json: {\n      content: cleaned,\n      platform: \"facebook\"\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [140, 700],
+      "id": "fn-format-content",
+      "name": "Làm sạch định dạng"
+    },
+    {
+      "parameters": { "mode": "combine", "combineBy": "combineByPosition", "options": {} },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [452, 350],
+      "id": "merge-ai-image",
+      "name": "Merge (ảnh AI + nội dung)",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": { "mode": "combine", "combineBy": "combineByPosition", "options": {} },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.1,
+      "position": [452, 550],
+      "id": "merge-drive-image",
+      "name": "Merge (ảnh Drive + nội dung)",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v22.0",
+        "node": "YOUR_FACEBOOK_PAGE_ID",
+        "edge": "feed",
+        "options": {
+          "queryParameters": {
+            "parameter": [
+              { "name": "message", "value": "={{ $('Làm sạch định dạng').item.json.content }}" },
+              { "name": "attached_media", "value": "={{ $json.id ? `[{\"media_fbid\":\"${$json.id}\"}]` : \"\" }}" },
+              { "name": "published", "value": "false" },
+              { "name": "scheduled_publish_time", "value": "={{ Math.floor(Date.now() / 1000) + 1800 }}" }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [672, 450],
+      "id": "fb-post-feed",
+      "name": "Đăng bài lên Fanpage (nháp, hẹn giờ 30 phút)",
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Facebook Graph API - VTGold Page"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-if1-01",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [892, 450],
+      "id": "if-post-success",
+      "name": "Đăng thành công?"
+    },
+    {
+      "parameters": {
+        "sendTo": "phv30688@gmail.com",
+        "subject": "✅ Đã tạo bài đăng NHÁP cho fanpage Quà tặng dát vàng",
+        "message": "=✅ Bài đăng sẽ tự động công khai sau 30 phút nữa!\n📄 Kiểm tra/chỉnh sửa tại: https://facebook.com/{{ $json.id.split('_')[0] }}/posts/{{ $json.id.split('_')[1] }}",
+        "options": { "appendAttribution": false }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1112, 450],
+      "id": "gmail-notify",
+      "name": "Gửi email thông báo",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Gmail - VTGold"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Lịch đăng tự động (9h sáng)": {
+      "main": [[{ "node": "Đọc lịch đăng hôm nay", "type": "main", "index": 0 }]]
+    },
+    "Đọc lịch đăng hôm nay": {
+      "main": [[{ "node": "Có nội dung hợp lệ?", "type": "main", "index": 0 }]]
+    },
+    "Form nhận nội dung thủ công": {
+      "main": [[{ "node": "Lưu nội dung từ Form", "type": "main", "index": 0 }]]
+    },
+    "Lưu nội dung từ Form": {
+      "main": [[{ "node": "Có nội dung hợp lệ?", "type": "main", "index": 0 }]]
+    },
+    "Có nội dung hợp lệ?": {
+      "main": [
+        [{ "node": "Phân tích & tạo prompt ảnh", "type": "main", "index": 0 }],
+        []
+      ]
+    },
+    "Phân tích & tạo prompt ảnh": {
+      "main": [[{ "node": "Tách JSON từ AI", "type": "main", "index": 0 }]]
+    },
+    "Gemini - Phân tích": {
+      "ai_languageModel": [[{ "node": "Phân tích & tạo prompt ảnh", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Tách JSON từ AI": {
+      "main": [
+        [
+          { "node": "Có prompt ảnh AI?", "type": "main", "index": 0 },
+          { "node": "Viết bài đầy đủ", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Có prompt ảnh AI?": {
+      "main": [
+        [{ "node": "Tạo ảnh AI (FLUX)", "type": "main", "index": 0 }],
+        [{ "node": "Lấy ảnh sản phẩm từ Drive (fallback)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Tạo ảnh AI (FLUX)": {
+      "main": [[{ "node": "Chuyển base64 thành file", "type": "main", "index": 0 }]]
+    },
+    "Chuyển base64 thành file": {
+      "main": [[{ "node": "Đăng ảnh AI lên FB (chưa publish)", "type": "main", "index": 0 }]]
+    },
+    "Đăng ảnh AI lên FB (chưa publish)": {
+      "main": [[{ "node": "Merge (ảnh AI + nội dung)", "type": "main", "index": 0 }]]
+    },
+    "Lấy ảnh sản phẩm từ Drive (fallback)": {
+      "main": [[{ "node": "Chọn 1 ảnh mới nhất", "type": "main", "index": 0 }]]
+    },
+    "Chọn 1 ảnh mới nhất": {
+      "main": [[{ "node": "Đăng ảnh Drive lên FB (chưa publish)", "type": "main", "index": 0 }]]
+    },
+    "Đăng ảnh Drive lên FB (chưa publish)": {
+      "main": [[{ "node": "Merge (ảnh Drive + nội dung)", "type": "main", "index": 0 }]]
+    },
+    "Viết bài đầy đủ": {
+      "main": [[{ "node": "Lưu nhật ký bài đăng", "type": "main", "index": 0 }]]
+    },
+    "Gemini - Viết bài": {
+      "ai_languageModel": [[{ "node": "Viết bài đầy đủ", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Lưu nhật ký bài đăng": {
+      "main": [[{ "node": "Làm sạch định dạng", "type": "main", "index": 0 }]]
+    },
+    "Làm sạch định dạng": {
+      "main": [
+        [
+          { "node": "Merge (ảnh AI + nội dung)", "type": "main", "index": 1 },
+          { "node": "Merge (ảnh Drive + nội dung)", "type": "main", "index": 1 }
+        ]
+      ]
+    },
+    "Merge (ảnh AI + nội dung)": {
+      "main": [[{ "node": "Đăng bài lên Fanpage (nháp, hẹn giờ 30 phút)", "type": "main", "index": 0 }]]
+    },
+    "Merge (ảnh Drive + nội dung)": {
+      "main": [[{ "node": "Đăng bài lên Fanpage (nháp, hẹn giờ 30 phút)", "type": "main", "index": 0 }]]
+    },
+    "Đăng bài lên Fanpage (nháp, hẹn giờ 30 phút)": {
+      "main": [[{ "node": "Đăng thành công?", "type": "main", "index": 0 }]]
+    },
+    "Đăng thành công?": {
+      "main": [[{ "node": "Gửi email thông báo", "type": "main", "index": 0 }], []]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "meta": { "templateCredsSetupCompleted": false },
+  "tags": []
+}
